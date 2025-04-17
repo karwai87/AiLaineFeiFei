@@ -1,47 +1,43 @@
 import os
-import asyncio
 from flask import Flask
+from threading import Thread
 from telegram.ext import Application, CommandHandler, MessageHandler, filters
-import threading
 from dotenv import load_dotenv
 
-# 加载 .env 环境变量（Railway 会自动读取）
 load_dotenv()
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 USER_ID = os.getenv("USER_ID")
 
-# Flask 应用（用于保活）
-app = Flask(__name__)
+# Flask 心跳应用
+flask_app = Flask(__name__)
 
-@app.route('/')
+@flask_app.route('/')
 def home():
-    return "AI妃上线中 💡"
+    return "AI妃 正常运行中 💡"
 
-# /start 指令处理
+# /start 指令
 async def start_command(update, context):
     await update.message.reply_text("AI妃已上线 💡 你可以直接跟我说话～")
 
-# 普通文本消息处理
+# 普通消息回应
 async def echo_message(update, context):
     if USER_ID and str(update.effective_user.id) != USER_ID:
         await update.message.reply_text("你无权访问此 bot")
         return
+    await update.message.reply_text(f"你说了：{update.message.text}")
 
-    user_message = update.message.text
-    await update.message.reply_text(f"你说了：{user_message}")
+# 启动 Flask 的线程函数
+def run_flask():
+    flask_app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 8080)))
 
-# 启动 Telegram Bot
-async def start_bot():
-    app_bot = Application.builder().token(BOT_TOKEN).build()
-    app_bot.add_handler(CommandHandler("start", start_command))
-    app_bot.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), echo_message))
+# 主入口
+if __name__ == '__main__':
+    # Flask 在独立线程启动
+    Thread(target=run_flask).start()
 
-    await app_bot.initialize()
-    await app_bot.start()
-    await app_bot.updater.start_polling()
+    # 启动 Telegram Bot（使用 run_polling）
+    application = Application.builder().token(BOT_TOKEN).build()
+    application.add_handler(CommandHandler("start", start_command))
+    application.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), echo_message))
 
-# 启动 Flask + Telegram
-if __name__ == "__main__":
-    bot_thread = threading.Thread(target=lambda: asyncio.run(start_bot()))
-    bot_thread.start()
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 8080)))
+    application.run_polling()
