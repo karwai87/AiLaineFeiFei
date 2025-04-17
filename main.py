@@ -1,43 +1,59 @@
+import logging
 import os
+import sentry_sdk
+from telegram import Update
+from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 from flask import Flask
 from threading import Thread
-from telegram.ext import Application, CommandHandler, MessageHandler, filters
 from dotenv import load_dotenv
 
+# 加载环境变量
 load_dotenv()
+
+# 设置日志
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
+
+# 集成Sentry
+sentry_sdk.init(os.getenv("SENTRY_DSN"))
+
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-USER_ID = os.getenv("USER_ID")
+WEBHOOK_URL = os.getenv("WEBHOOK_URL")
 
-# Flask 心跳应用
-flask_app = Flask(__name__)
+app_flask = Flask(__name__)
 
-@flask_app.route('/')
+@app_flask.route('/')
 def home():
-    return "AI妃 正常运行中 💡"
+    return "AI妃 Telegram Bot 正常运行中 🚀"
 
-# /start 指令
-async def start_command(update, context):
-    await update.message.reply_text("AI妃已上线 💡 你可以直接跟我说话～")
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("欢迎使用 AI 妃系统！请输入 /auth 授权 Google")
 
-# 普通消息回应
-async def echo_message(update, context):
-    if USER_ID and str(update.effective_user.id) != USER_ID:
-        await update.message.reply_text("你无权访问此 bot")
-        return
-    await update.message.reply_text(f"你说了：{update.message.text}")
+async def auth(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    auth_url = os.getenv("WEBHOOK_URL").replace('/webhook', '/oauth2callback')
+    await update.message.reply_text(f"点击链接进行Google授权：{auth_url}")
 
-# 启动 Flask 的线程函数
 def run_flask():
-    flask_app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 8080)))
+    app_flask.run(host='0.0.0.0', port=int(os.getenv("PORT", 8080)))
 
-# 主入口
+async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
+    logger.error(f"出现错误: {context.error}")
+    sentry_sdk.capture_exception(context.error)
+
 if __name__ == '__main__':
-    # Flask 在独立线程启动
-    Thread(target=run_flask).start()
+    flask_thread = Thread(target=run_flask)
+    flask_thread.start()
 
-    # 启动 Telegram Bot（使用 run_polling）
-    application = Application.builder().token(BOT_TOKEN).build()
-    application.add_handler(CommandHandler("start", start_command))
-    application.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), echo_message))
+    application = ApplicationBuilder().token(BOT_TOKEN).build()
 
-    application.run_polling()
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(CommandHandler("auth", auth))
+
+    application.add_error_handler(error_handler)
+
+    application.run_webhook(
+        listen="0.0.0.0",
+        port=int(os.getenv("PORT", 8080)),
+        url_path='webhook',
+        webhook_url=WEBHOOK_URL
+    )
